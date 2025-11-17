@@ -1,83 +1,29 @@
-name: Linux-SSH-Tailscale
+name: Linux VPS with SSH + Tailscale
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-linux:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 3600
 
     steps:
-      - name: Update System & Install SSH
-        run: |
-          sudo apt update -y
-          sudo apt install openssh-server -y
-          sudo systemctl enable ssh --now
+    - name: Update system
+      run: sudo apt update && sudo apt upgrade -y
 
-      - name: Create SSH User with Secure Password
-        run: |
-          # Generate a strong random password
-          PASS=$(openssl rand -base64 24)
+    - name: Install SSH server
+      run: |
+        sudo apt install -y openssh-server
+        sudo systemctl enable ssh
+        sudo systemctl start ssh
 
-          # Create user "remote"
-          sudo useradd -m -s /bin/bash remote || true
-          echo "remote:$PASS" | sudo chpasswd
+    - name: Create SSH user
+      run: |
+        sudo useradd -m -s /bin/bash kali
+        echo "kali:Password123!" | sudo chpasswd
+        sudo usermod -aG sudo kali
 
-          # Add to sudoers
-          sudo usermod -aG sudo remote
-
-          # Save credentials to GitHub environment
-          echo "SSH_USER=remote" >> $GITHUB_ENV
-          echo "SSH_PASS=$PASS" >> $GITHUB_ENV
-
-      - name: Configure SSH for Password Login
-        run: |
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh
-
-      - name: Install Tailscale
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-
-      - name: Bring Tailscale Online
-        run: |
-          sudo tailscale up \
-            --authkey ${{ secrets.TAILSCALE_AUTH_KEY }} \
-            --hostname linux-runner-${{ github.run_id }} \
-            --ssh
-
-          # Wait for IP assignment
-          for i in {1..10}; do
-            IP=$(tailscale ip -4)
-            if [ ! -z "$IP" ]; then break; fi
-            sleep 3
-          done
-
-          if [ -z "$IP" ]; then
-            echo "Tailscale failed to obtain an IP"
-            exit 1
-          fi
-
-          echo "TS_IP=$IP" >> $GITHUB_ENV
-
-      - name: Show SSH Details
-        run: |
-          echo ""
-          echo "========== SSH ACCESS =========="
-          echo "Tailscale IP: $TS_IP"
-          echo "Username: $SSH_USER"
-          echo "Password: $SSH_PASS"
-          echo "Command:"
-          echo "ssh $SSH_USER@$TS_IP"
-          echo "================================"
-          echo ""
-
-      - name: Keep Runner Alive
-        run: |
-          while true; do
-            echo "[$(date)] SSH Available @ $TS_IP"
-            sleep 300
-          done
+    - name: Install Tailscale
+      run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+        sudo tailscale up --authkey ${{ secrets.TS_KEY }} --hostname kali-vps --ssh
